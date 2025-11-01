@@ -14,6 +14,7 @@ import lombok.Data;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -28,7 +29,10 @@ public class SupportTicket {
     private LocalDateTime servedTimestamp;
     private String subject;
     private Priority priority;
-    List<String> replies;
+    @ElementCollection
+    @CollectionTable(name = "ticket_replies", joinColumns = @JoinColumn(name = "ticket_id"))
+    @Column(name = "reply")
+    private List<String> replies = new ArrayList<>();
 
     private String content;
     private String attachments;

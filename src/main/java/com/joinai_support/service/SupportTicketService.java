@@ -114,52 +114,69 @@ public class SupportTicketService {
     @Transactional
     public ResponseEntity<String> updateTicket(TicketStatusDTO supportTicket) {
         Optional<SupportTicket> supportTicketEntity = supportTicketRepository.findById(supportTicket.getTicketId());
-        if (supportTicketEntity.isPresent()) {
-            SupportTicket ticket = supportTicketEntity.get();
-            // Update ticket status
-            ticket.setStatus(supportTicket.getStatus());
-            Duration between = Duration.between(ticket.getLaunchTimestamp(), LocalDateTime.now());
-            ticket.setTimeLimit(between);
-            ticket.setServedTimestamp(LocalDateTime.now());
-
-            // Save the updated ticket
-            supportTicketRepository.save(ticket);
-
-            // Send email notification to the assigned admin
-            Admin assignedAdmin = ticket.getAssignedTo();
-            if (assignedAdmin != null) {
-                try {
-                    mailSenderService.sendTicketUpdateNotification(ticket, assignedAdmin);
-                    logger.info("Ticket update notification sent to admin: {}", assignedAdmin.getEmail());
-                } catch (Exception e) {
-                    // Log the exception but don't fail the ticket update
-                    logger.error("Failed to send ticket update notification to admin: {}", assignedAdmin.getEmail(), e);
-                }
-            } else {
-                logger.warn("No admin assigned to ticket ID: {}, cannot send notification", ticket.getId());
-            }
-
-            // Send notification to ticket issuer if the ticket is being closed
-            //
-            if (ticket.getStatus() == Status.CLOSED) {
-                try {
-                    mailSenderService.sendTicketClosedNotification(ticket, supportTicket.getReply());
-                    ticketAnalysisService.addReply(String.valueOf(supportTicket.getTicketId()), supportTicket.getReply());
-                    logger.info("Ticket closed notification sent to issuer: {}", ticket.getSubject());
-                } catch (Exception e) {
-                    // Log the exception but don't fail the ticket update
-                    logger.error("Failed to send ticket closed notification to issuer: {}", ticket.getSubject(), e);
-                }
-            }
-
-            return ResponseEntity.ok("Ticket successfully updated.");
-        }
-        else {
+        if (supportTicketEntity.isEmpty()) {
             logger.warn("Ticket not found with ID: {}", supportTicket.getTicketId());
             return ResponseEntity.notFound().build();
         }
-    }
 
+        SupportTicket ticket = supportTicketEntity.get();
+
+        // Safely add reply - only if not null or empty
+        if (supportTicket.getReply() != null && !supportTicket.getReply().trim().isEmpty()) {
+            if (ticket.getReplies() == null) {
+                ticket.setReplies(new ArrayList<>());
+            }
+            ticket.getReplies().add(supportTicket.getReply().trim());
+            logger.info("Reply added to ticket ID: {}", supportTicket.getTicketId());
+        } else {
+            logger.info("No reply provided for ticket ID: {}, updating status only", supportTicket.getTicketId());
+        }
+
+        // Update ticket status and timestamps
+        ticket.setStatus(supportTicket.getStatus());
+        ticket.setTimeLimit(Duration.between(ticket.getLaunchTimestamp(), LocalDateTime.now()));
+        ticket.setServedTimestamp(LocalDateTime.now());
+        ticket.setUpdatedAt(LocalDateTime.now());
+
+        // Save updated ticket
+        supportTicketRepository.save(ticket);
+
+        // Send email to assigned admin
+        Admin assignedAdmin = ticket.getAssignedTo();
+        if (assignedAdmin != null) {
+            try {
+                mailSenderService.sendTicketUpdateNotification(ticket, assignedAdmin);
+                logger.info("Ticket update notification sent to admin: {}", assignedAdmin.getEmail());
+            } catch (Exception e) {
+                logger.error("Failed to send ticket update notification to admin: {}", assignedAdmin.getEmail(), e);
+            }
+        } else {
+            logger.warn("No admin assigned to ticket ID: {}, cannot send notification", ticket.getId());
+        }
+
+        // Send issuer notification if ticket is closed
+        if (ticket.getStatus() == Status.CLOSED) {
+            try {
+                // Only pass reply if it's not null/empty
+                String replyForNotification = (supportTicket.getReply() != null && !supportTicket.getReply().trim().isEmpty())
+                        ? supportTicket.getReply()
+                        : "Ticket closed without additional comments.";
+
+                mailSenderService.sendTicketClosedNotification(ticket, replyForNotification);
+
+                // Only add to analysis if reply exists
+                if (supportTicket.getReply() != null && !supportTicket.getReply().trim().isEmpty()) {
+                    ticketAnalysisService.addReply(String.valueOf(supportTicket.getTicketId()), supportTicket.getReply());
+                }
+
+                logger.info("Ticket closed notification sent to issuer: {}", ticket.getSubject());
+            } catch (Exception e) {
+                logger.error("Failed to send ticket closed notification to issuer: {}", ticket.getSubject(), e);
+            }
+        }
+
+        return ResponseEntity.ok("Ticket successfully updated.");
+    }
     public ResponseEntity<List<SupportTicket>> getMyTickets(Authenticate authenticationResponse) {
       // List<SupportTicket> tickets = userValidator.getUser(authenticationResponse.getToken()).getTickets();
         List<SupportTicket> tickets= adminRepository.findByEmail(authenticationResponse.getEmail()).getTickets();
