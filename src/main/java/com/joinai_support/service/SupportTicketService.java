@@ -48,12 +48,12 @@ public class SupportTicketService {
 
         if (agentList == null || agentList.isEmpty()) {
             logger.warn("No admins available to assign the ticket");
-            return "No admins available to assign the ticket.";
+            return "No agents available to assign the ticket.";
         }
 
         // Find the admin with the least number of tickets
         Admin selectedAdmin = agentList.stream()
-                .filter(admin -> admin.getTickets() != null) // Ensure tickets are not null
+                .filter(admin -> admin.getTickets() != null)
                 .min(Comparator.comparingInt(admin -> admin.getTickets().size()))
                 .orElse(null);
 

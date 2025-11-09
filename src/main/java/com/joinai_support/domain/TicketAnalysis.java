@@ -13,8 +13,6 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-import static javax.naming.ldap.Control.CRITICAL;
-
 @Document(collection = "ticket_analysis")
 @Data
 public class TicketAnalysis {
@@ -55,6 +53,30 @@ public class TicketAnalysis {
     private String resolutionType;                  // "FIX", "WORKAROUND", "REFUND"
 
     public TicketAnalysis(String ticketId, String question, String issuerEmail) {
+        this.ticketId = ticketId;
+        this.question = question;
+        this.issuerEmail = issuerEmail;
+        this.createdAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+        this.status = Status.OPEN;
+        this.totalReplies = 0;
+        this.requiresFollowup = false;
+
+        // ✅ CRITICAL: Set default values for analytics fields
+        this.priority = Priority.MEDIUM;        // Default priority
+        this.category = Category.SUPPORT; // Default category
+        this.source = TicketSource.CHATBOT;    // Default source
+
+        // ✅ Initialize analytics fields with defaults
+        this.businessImpact = "LOW";
+        this.slaStatus = "PENDING";
+        this.isHighPriority = false;
+        this.isRevenueAffecting = false;
+        this.resolutionType = "PENDING";
+        this.customerSatisfactionScore = 0;
+
+        // ✅ Initialize derived fields
+        updateDerivedFields();
     }
 
 
@@ -88,7 +110,7 @@ public class TicketAnalysis {
         updateDerivedFields();
     }
 
-    // ✅ HELPER METHODS (Private - internal use only)
+    // ✅HELPER METHODS (Private - internal use only)
     private void updateDerivedFields() {
         this.isHighPriority = (priority == Priority.HIGH || priority == Priority.URGENT);
         this.periodKey = generatePeriodKey(createdAt);

@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +32,7 @@ public class MailSenderService {
      * @param name Name of the recipient
      * @param password Initial password for the account
      */
+    @Async
     public void sendWelcomeEmail(String to, String name, String password) {
         String subject = "Welcome to JoinAI Support Platform";
         String text = "Hello " + name + ",\n\n" +
@@ -49,6 +51,7 @@ public class MailSenderService {
      * @param ticket The support ticket that was created
      * @param admin The admin/agent the ticket is assigned to
      */
+    @Async
     public void sendTicketCreationNotification(SupportTicket ticket, Admin admin) {
         String subject = "New Support Ticket Assigned - #" + ticket.getId();
         String text = "Hello " + admin.getFirstName() + ",\n\n" +
@@ -69,6 +72,7 @@ public class MailSenderService {
      * @param ticket The support ticket that was updated
      * @param admin The admin/agent who is assigned to the ticket
      */
+    @Async
     public void sendTicketUpdateNotification(SupportTicket ticket, Admin admin) {
         String subject = "Support Ticket Updated - #" + ticket.getId();
         String text = "Hello " + admin.getFirstName() + ",\n\n" +
@@ -155,6 +159,7 @@ public class MailSenderService {
      */
 
 
+    @Async
     public void sendTicketOpenedNotification(SupportTicket ticket) {
         if (ticket.getSubject() == null || ticket.getSubject().isEmpty()) {
             logger.warn("Cannot send ticket opened notification: subject (which contains issuer info) is missing for ticket ID: {}",
@@ -171,6 +176,7 @@ public class MailSenderService {
         sendEmail(ticket.getIssuerEmail(), emailSubject, emailBody);
     }
 
+    @Async
     private String buildTicketCreationEmailBody(SupportTicket ticket) {
         StringBuilder emailBody = new StringBuilder();
 
@@ -227,6 +233,8 @@ public class MailSenderService {
      * @param otp One-time password for resetting the password
      * @param email Email address of the recipient
      */
+
+    @Async
     public void sendPasswordResetEmail(String otp, String email) {
         String subject = "Password Reset Request - JoinAI Support Platform";
         String text = "Hello,\n\n" +
@@ -263,6 +271,8 @@ public class MailSenderService {
      * @param subject Subject of the email
      * @param text Body of the email
      */
+
+    @Async
     private void sendEmail(String to, String subject, String text) {
         // Validate email address before sending
         if (!isValidEmail(to)) {

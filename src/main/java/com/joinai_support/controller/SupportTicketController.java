@@ -37,6 +37,7 @@ public class SupportTicketController {
         return supportTicketService.launchTicket(supportTicket);
     }
 
+    //Opening a ticket using Chatbot
     @PostMapping("/openTicket")
     public String openTicket(@RequestBody SupportTicketRequest supportTicket) {
         SupportTicket ticket = new SupportTicket();

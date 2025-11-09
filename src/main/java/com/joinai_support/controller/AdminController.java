@@ -108,8 +108,5 @@ public class AdminController {
         return adminService.systemAnalytics();
     }
 
-    @PostMapping("/otp")
-    public ResponseEntity<String> getOtp(@RequestBody OTP requestOTP){
-        return adminService.createOTP();
-    }
+
 }
