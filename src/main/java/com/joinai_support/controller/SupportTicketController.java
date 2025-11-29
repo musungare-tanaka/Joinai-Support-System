@@ -5,7 +5,7 @@ import com.joinai_support.domain.SupportTicket;
 import com.joinai_support.dto.*;
 import com.joinai_support.repository.AdminRepository;
 import com.joinai_support.repository.UserRepository;
-import com.joinai_support.service.SupportTicketService;
+import com.joinai_support.service.serviceImpl.SupportTicketServiceImpl;
 import com.joinai_support.utils.Authenticate;
 import com.joinai_support.utils.TicketDTO;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,20 +21,20 @@ import java.util.Optional;
 @CrossOrigin("*")
 public class SupportTicketController {
 
-    private final SupportTicketService supportTicketService;
+    private final SupportTicketServiceImpl supportTicketServiceImpl;
     private final UserRepository userRepository;
     private final AdminRepository adminRepository;
 
     @Autowired
-    public SupportTicketController(SupportTicketService supportTicketService, UserRepository userRepository, AdminRepository adminRepository) {
-        this.supportTicketService = supportTicketService;
+    public SupportTicketController(SupportTicketServiceImpl supportTicketServiceImpl, UserRepository userRepository, AdminRepository adminRepository) {
+        this.supportTicketServiceImpl = supportTicketServiceImpl;
         this.userRepository = userRepository;
         this.adminRepository = adminRepository;
     }
 
     @PostMapping("/launchTicket")
     public String launchTicket(@RequestBody SupportTicket supportTicket) {
-        return supportTicketService.launchTicket(supportTicket);
+        return supportTicketServiceImpl.launchTicket(supportTicket);
     }
 
     //Opening a ticket using Chatbot
@@ -44,29 +44,29 @@ public class SupportTicketController {
         ticket.setIssuerEmail(supportTicket.getEmail());
         ticket.setSubject(supportTicket.getSubject());
         ticket.setContent(supportTicket.getContent());
-        return supportTicketService.launchTicket(ticket);
+        return supportTicketServiceImpl.launchTicket(ticket);
     }
 
     @RequestMapping("/updateTicket")
     public ResponseEntity<String> updateTicket(@RequestBody TicketStatusDTO supportTicket) {
-        return supportTicketService.updateTicket(supportTicket);
+        return supportTicketServiceImpl.updateTicket(supportTicket);
     }
 
     @PostMapping("/getMyTickets")
     public ResponseEntity<List<SupportTicket>> getMyTickets(@RequestBody Authenticate authenticationResponse) {
-        return supportTicketService.getMyTickets(authenticationResponse);
+        return supportTicketServiceImpl.getMyTickets(authenticationResponse);
     }
 
     @RequestMapping("/getStats")
     public ResponseEntity<StatisticsDTO> getStats(@RequestBody AuthenticationResponse authenticationResponse) {
-            return supportTicketService.getStatistics();
+            return supportTicketServiceImpl.getStatistics();
     }
 
     @RequestMapping("/getMyStats")
     public ResponseEntity<StatsByAgent> getMyStats(@RequestBody Authenticate authenticationResponse) {
         Optional<Admin> admin = Optional.ofNullable(adminRepository.findByEmail(authenticationResponse.getToken()));
         if (admin.isPresent()) {
-            return supportTicketService.getStatsByAgent(admin.get());
+            return supportTicketServiceImpl.getStatsByAgent(admin.get());
         }
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
@@ -74,7 +74,7 @@ public class SupportTicketController {
 
     @RequestMapping("/ticketNotifications")
     public ResponseEntity<List<TicketDTO>> getTicketNotifications(@RequestBody EmailRequest emailRequest) {
-        return supportTicketService.getNotifications(emailRequest.getEmail());
+        return supportTicketServiceImpl.getNotifications(emailRequest.getEmail());
     }
 
 
