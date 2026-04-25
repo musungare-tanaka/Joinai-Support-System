@@ -16,6 +16,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -195,76 +196,251 @@ public class AdminServiceImpl implements AdminService {
         return ResponseEntity.ok(supportTicketRepository.findAll());
     }
 
+    @Transactional
     public ResponseEntity<SystemAnalytics> systemAnalytics() {
-        // total  agents
-        List<Admin> allAdmins = adminRepository.findAll();
-        long agents = allAdmins.stream().filter(admin -> admin.getRole() == Role.AGENT).toList().size();
-
-        //open tickets
-        long openTickets=supportTicketRepository.findAll().parallelStream()
-                .filter(supportTicket -> supportTicket.getStatus() == Status.OPEN).count();
-
-        //daily tickets  
+        List<SupportTicket> allTickets = supportTicketRepository.findAll();
+        List<Admin> agents = adminRepository.findAllByRole(Role.AGENT);
 
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime localDateTime =LocalDateTime.now();
-        List<SupportTicket> tickets = supportTicketRepository.findAll();
-
-        // Daily stats (last 24 hours)
         LocalDateTime dailyStart = now.minusHours(24);
-        long dailytickets = (tickets.stream()
-                .filter(supportTicket ->
-                        supportTicket.getLaunchTimestamp().isAfter(dailyStart) ||
-                                supportTicket.getLaunchTimestamp().isEqual(dailyStart))
-                .count());
+        LocalDateTime weeklyStart = now.minusDays(7);
+        LocalDateTime monthlyStart = now.minusDays(30);
 
+        long totalTickets = allTickets.size();
+        long openTickets = allTickets.stream().filter(ticket -> ticket.getStatus() == Status.OPEN).count();
+        long closedTickets = allTickets.stream().filter(ticket -> ticket.getStatus() == Status.CLOSED).count();
+        long newTickets = allTickets.stream().filter(ticket -> ticket.getStatus() == Status.NEW).count();
 
+        long dailyTickets = allTickets.stream()
+                .filter(ticket -> isWithinWindow(ticket.getLaunchTimestamp(), dailyStart))
+                .count();
+        long weeklyTickets = allTickets.stream()
+                .filter(ticket -> isWithinWindow(ticket.getLaunchTimestamp(), weeklyStart))
+                .count();
+        long monthlyTickets = allTickets.stream()
+                .filter(ticket -> isWithinWindow(ticket.getLaunchTimestamp(), monthlyStart))
+                .count();
 
+        long resolvedToday = allTickets.stream()
+                .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), dailyStart))
+                .count();
+        long resolvedThisWeek = allTickets.stream()
+                .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), weeklyStart))
+                .count();
+        long resolvedThisMonth = allTickets.stream()
+                .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), monthlyStart))
+                .count();
 
+        List<PerformanceDTO> performanceByAgent = new ArrayList<>();
+        List<Ticket> ticketDistribution = new ArrayList<>();
 
-        List<PerformanceDTO> list = new ArrayList<>();
+        for (Admin admin : agents) {
+            List<SupportTicket> agentTickets = admin.getTickets() == null ? new ArrayList<>() : admin.getTickets();
 
-        adminRepository.findAllByRole(Role.AGENT).forEach(admin -> {
-            PerformanceDTO performance = new PerformanceDTO();
-            performance.setFrc(34.2);
-            performance.setAgentName(admin.getFirstName());
-            performance.setOpenTickets(admin.getTickets()
-                    .parallelStream().filter(adminTicket -> adminTicket.getStatus() == Status.OPEN).count());
-            performance.setOldTickets(admin.getTickets().parallelStream()
-                    .filter(adminTicket ->adminTicket.getStatus() ==Status.OPEN && adminTicket.getLaunchTimestamp().isAfter(dailyStart)).count());
-            list.add(performance);
+            long agentTotal = agentTickets.size();
+            long agentOpen = agentTickets.stream().filter(ticket -> ticket.getStatus() == Status.OPEN).count();
+            long agentClosed = agentTickets.stream().filter(ticket -> ticket.getStatus() == Status.CLOSED).count();
+            long agentNew = agentTickets.stream().filter(ticket -> ticket.getStatus() == Status.NEW).count();
+            long oldOpenTickets = agentTickets.stream()
+                    .filter(ticket -> ticket.getStatus() == Status.OPEN)
+                    .filter(ticket -> ticket.getLaunchTimestamp() != null && !ticket.getLaunchTimestamp().isAfter(dailyStart))
+                    .count();
+            long agentHighPriority = agentTickets.stream()
+                    .filter(ticket -> ticket.getPriority() == Priority.HIGH
+                            || ticket.getPriority() == Priority.URGENT
+                            || ticket.getPriority() == Priority.CRITICAL)
+                    .count();
+            long agentUrgent = agentTickets.stream()
+                    .filter(ticket -> ticket.getPriority() == Priority.URGENT || ticket.getPriority() == Priority.CRITICAL)
+                    .count();
+            long repliesCount = agentTickets.stream()
+                    .mapToLong(ticket -> ticket.getReplies() == null ? 0 : ticket.getReplies().size())
+                    .sum();
 
-        });
+            long solvedPast24Hours = agentTickets.stream()
+                    .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), dailyStart))
+                    .count();
+            long solvedPastWeek = agentTickets.stream()
+                    .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), weeklyStart))
+                    .count();
+            long solvedPastMonth = agentTickets.stream()
+                    .filter(ticket -> isWithinWindow(resolveClosedTimestamp(ticket), monthlyStart))
+                    .count();
+
+            PerformanceDTO performanceDTO = new PerformanceDTO();
+            performanceDTO.setAgentName(resolveAgentName(admin));
+            performanceDTO.setAgentEmail(admin.getEmail());
+            performanceDTO.setTotalTickets(agentTotal);
+            performanceDTO.setOpenTickets(agentOpen);
+            performanceDTO.setClosedTickets(agentClosed);
+            performanceDTO.setNewTickets(agentNew);
+            performanceDTO.setOldTickets(oldOpenTickets);
+            performanceDTO.setHighPriorityTickets(agentHighPriority);
+            performanceDTO.setUrgentTickets(agentUrgent);
+            performanceDTO.setRepliesCount(repliesCount);
+            performanceDTO.setSolvedPast24Hours(solvedPast24Hours);
+            performanceDTO.setSolvedPastWeek(solvedPastWeek);
+            performanceDTO.setSolvedPastMonth(solvedPastMonth);
+            performanceDTO.setFrc(calculateFcrRate(agentTickets));
+            performanceDTO.setAvgResponseTimeMinutes(calculateAverageResponseTimeMinutes(agentTickets));
+            performanceDTO.setAvgResolutionTimeMinutes(calculateAverageResolutionTimeMinutes(agentTickets));
+            performanceDTO.setResolutionRate(percentage(agentClosed, agentTotal));
+            performanceDTO.setSlaBreachRate(calculateSlaBreachRate(agentTickets));
+            performanceByAgent.add(performanceDTO);
+
+            Ticket agentPriority = new Ticket();
+            agentPriority.setName(resolveAgentName(admin));
+            for (SupportTicket ticket : agentTickets) {
+                if (ticket.getPriority() == Priority.HIGH) {
+                    agentPriority.setHigh(agentPriority.getHigh() + 1);
+                } else if (ticket.getPriority() == Priority.LOW) {
+                    agentPriority.setLow(agentPriority.getLow() + 1);
+                } else if (ticket.getPriority() == Priority.NORMAL || ticket.getPriority() == Priority.MEDIUM) {
+                    agentPriority.setNormal(agentPriority.getNormal() + 1);
+                } else if (ticket.getPriority() == Priority.URGENT || ticket.getPriority() == Priority.CRITICAL) {
+                    agentPriority.setUrgent(agentPriority.getUrgent() + 1);
+                }
+            }
+            ticketDistribution.add(agentPriority);
+        }
 
         SystemAnalytics systemAnalytics = new SystemAnalytics();
-        systemAnalytics.setTotalAgents(agents);
+        systemAnalytics.setTotalTickets(totalTickets);
         systemAnalytics.setOpenTickets(openTickets);
-        systemAnalytics.setDailyTickets(dailytickets);
-        systemAnalytics.setPerformance(list);
-
-        List<Ticket> ticklist = new ArrayList<>();
-
-
-        allAdmins.parallelStream().filter(admin -> admin.getRole() == Role.AGENT).forEach(admin -> {
-            Ticket ticket = new Ticket();
-            ticket.setName(admin.getFirstName());
-            admin.getTickets().parallelStream().forEach(adminTicket -> {
-                if (adminTicket.getPriority() == Priority.HIGH) {
-                    ticket.setHigh(ticket.getHigh() + 1);
-                } else if (adminTicket.getPriority() == Priority.LOW) {
-                    ticket.setLow(ticket.getLow() + 1);
-                }else if (adminTicket.getPriority() == Priority.NORMAL) {
-                    ticket.setNormal(ticket.getNormal() + 1);
-                } else if (adminTicket.getPriority() == Priority.URGENT) {
-                    ticket.setUrgent(ticket.getUrgent() + 1);
-                }
-            });
-            ticklist.add(ticket);
-        });
-        systemAnalytics.setTickets(ticklist);
-
+        systemAnalytics.setClosedTickets(closedTickets);
+        systemAnalytics.setNewTickets(newTickets);
+        systemAnalytics.setTotalAgents(agents.size());
+        systemAnalytics.setDailyTickets(dailyTickets);
+        systemAnalytics.setWeeklyTickets(weeklyTickets);
+        systemAnalytics.setMonthlyTickets(monthlyTickets);
+        systemAnalytics.setResolvedToday(resolvedToday);
+        systemAnalytics.setResolvedThisWeek(resolvedThisWeek);
+        systemAnalytics.setResolvedThisMonth(resolvedThisMonth);
+        systemAnalytics.setAvgResponseTimeMinutes(calculateAverageResponseTimeMinutes(allTickets));
+        systemAnalytics.setAvgResolutionTimeMinutes(calculateAverageResolutionTimeMinutes(allTickets));
+        systemAnalytics.setClosureRate(percentage(closedTickets, totalTickets));
+        systemAnalytics.setFrcRate(calculateFcrRate(allTickets));
+        systemAnalytics.setSlaBreachRate(calculateSlaBreachRate(allTickets));
+        systemAnalytics.setPerformance(performanceByAgent);
+        systemAnalytics.setTickets(ticketDistribution);
 
         return ResponseEntity.ok(systemAnalytics);
+    }
+
+    private String resolveAgentName(Admin admin) {
+        if (admin.getFirstName() != null && !admin.getFirstName().isBlank()) {
+            return admin.getFirstName();
+        }
+        return admin.getEmail();
+    }
+
+    private LocalDateTime resolveClosedTimestamp(SupportTicket ticket) {
+        if (ticket == null || ticket.getStatus() != Status.CLOSED) {
+            return null;
+        }
+        if (ticket.getServedTimestamp() != null) {
+            return ticket.getServedTimestamp();
+        }
+        return ticket.getUpdatedAt();
+    }
+
+    private boolean isWithinWindow(LocalDateTime value, LocalDateTime startInclusive) {
+        if (value == null || startInclusive == null) {
+            return false;
+        }
+        return value.isAfter(startInclusive) || value.isEqual(startInclusive);
+    }
+
+    private double calculateAverageResponseTimeMinutes(List<SupportTicket> tickets) {
+        double averageMinutes = tickets.stream()
+                .map(this::resolveResponseDuration)
+                .flatMap(Optional::stream)
+                .mapToLong(Duration::toMinutes)
+                .average()
+                .orElse(0.0);
+        return roundToTwoDecimals(averageMinutes);
+    }
+
+    private double calculateAverageResolutionTimeMinutes(List<SupportTicket> tickets) {
+        double averageMinutes = tickets.stream()
+                .map(this::resolveResolutionDuration)
+                .flatMap(Optional::stream)
+                .mapToLong(Duration::toMinutes)
+                .average()
+                .orElse(0.0);
+        return roundToTwoDecimals(averageMinutes);
+    }
+
+    private double calculateFcrRate(List<SupportTicket> tickets) {
+        long closedTickets = tickets.stream().filter(ticket -> ticket.getStatus() == Status.CLOSED).count();
+        long firstContactResolved = tickets.stream()
+                .filter(ticket -> ticket.getStatus() == Status.CLOSED)
+                .filter(ticket -> ticket.getReplies() == null || ticket.getReplies().size() <= 1)
+                .count();
+        return percentage(firstContactResolved, closedTickets);
+    }
+
+    private double calculateSlaBreachRate(List<SupportTicket> tickets) {
+        List<Duration> responseDurations = tickets.stream()
+                .map(this::resolveResponseDuration)
+                .flatMap(Optional::stream)
+                .toList();
+
+        if (responseDurations.isEmpty()) {
+            return 0.0;
+        }
+
+        long breached = responseDurations.stream()
+                .filter(duration -> duration.toHours() > 24)
+                .count();
+        return percentage(breached, responseDurations.size());
+    }
+
+    private Optional<Duration> resolveResponseDuration(SupportTicket ticket) {
+        if (ticket == null || ticket.getLaunchTimestamp() == null || ticket.getServedTimestamp() == null) {
+            return Optional.empty();
+        }
+
+        Duration duration = Duration.between(ticket.getLaunchTimestamp(), ticket.getServedTimestamp());
+        if (duration.isNegative()) {
+            return Optional.empty();
+        }
+        return Optional.of(duration);
+    }
+
+    private Optional<Duration> resolveResolutionDuration(SupportTicket ticket) {
+        if (ticket == null || ticket.getStatus() != Status.CLOSED || ticket.getLaunchTimestamp() == null) {
+            return Optional.empty();
+        }
+
+        if (ticket.getTimeLimit() != null && !ticket.getTimeLimit().isNegative()) {
+            return Optional.of(ticket.getTimeLimit());
+        }
+
+        LocalDateTime resolvedAt = ticket.getServedTimestamp() != null
+                ? ticket.getServedTimestamp()
+                : ticket.getUpdatedAt();
+
+        if (resolvedAt == null) {
+            return Optional.empty();
+        }
+
+        Duration duration = Duration.between(ticket.getLaunchTimestamp(), resolvedAt);
+        if (duration.isNegative()) {
+            return Optional.empty();
+        }
+        return Optional.of(duration);
+    }
+
+    private double percentage(long value, long total) {
+        if (total <= 0) {
+            return 0.0;
+        }
+        return roundToTwoDecimals((value * 100.0) / total);
+    }
+
+    private double roundToTwoDecimals(double value) {
+        return Math.round(value * 100.0) / 100.0;
     }
 
     public ResponseEntity<AdminDTO> getProfileData(EmailRequest profileRequest) {

@@ -4,7 +4,9 @@ import com.joinai_support.utils.Category;
 import com.joinai_support.utils.Priority;
 import com.joinai_support.utils.Status;
 import com.joinai_support.utils.TicketSource;
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 
@@ -51,6 +53,7 @@ public class TicketAnalysis {
     private String affectedProduct;                 // Which product/service
     private Boolean isRevenueAffecting;             // Does this impact revenue?
     private String resolutionType;                  // "FIX", "WORKAROUND", "REFUND"
+    private List<TicketConversationEntry> conversationHistory = new ArrayList<>();
 
     public TicketAnalysis(String ticketId, String question, String issuerEmail) {
         this.ticketId = ticketId;
@@ -77,6 +80,9 @@ public class TicketAnalysis {
 
         // ✅ Initialize derived fields
         updateDerivedFields();
+
+        // Seed conversation history with the original user request
+        addConversationEntry("USER", "chatbot", question, this.createdAt);
     }
 
 
@@ -106,6 +112,11 @@ public class TicketAnalysis {
         if (repliedBy.startsWith("agent:") && firstResponseAt == null) {
             recordFirstResponse(lastReplyAt);
         }
+
+        String actorRole = repliedBy != null && repliedBy.startsWith("agent:")
+                ? "AGENT"
+                : "USER";
+        addConversationEntry(actorRole, "agent-dashboard", reply, this.lastReplyAt);
 
         updateDerivedFields();
     }
@@ -156,5 +167,38 @@ public class TicketAnalysis {
 
     public void addReply(String reply) {
         this.replies.add(reply);
+        this.lastReplyAt = LocalDateTime.now();
+        this.updatedAt = LocalDateTime.now();
+        this.totalReplies = this.replies.size();
+        addConversationEntry("AGENT", "agent-dashboard", reply, this.lastReplyAt);
+    }
+
+    public void addConversationEntry(String actorRole, String channel, String message, LocalDateTime timestamp) {
+        if (message == null || message.isBlank()) {
+            return;
+        }
+
+        if (this.conversationHistory == null) {
+            this.conversationHistory = new ArrayList<>();
+        }
+
+        TicketConversationEntry entry = new TicketConversationEntry();
+        entry.setActorRole(actorRole == null || actorRole.isBlank() ? "SYSTEM" : actorRole);
+        entry.setChannel(channel == null || channel.isBlank() ? "unknown" : channel);
+        entry.setMessage(message.trim());
+        entry.setTimestamp(timestamp == null ? LocalDateTime.now() : timestamp);
+
+        this.conversationHistory.add(entry);
+        this.updatedAt = LocalDateTime.now();
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TicketConversationEntry {
+        private String actorRole;
+        private String channel;
+        private String message;
+        private LocalDateTime timestamp;
     }
 }

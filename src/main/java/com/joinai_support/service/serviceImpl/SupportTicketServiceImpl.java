@@ -2,6 +2,7 @@ package com.joinai_support.service.serviceImpl;
 
 import com.joinai_support.domain.Admin;
 import com.joinai_support.domain.SupportTicket;
+import com.joinai_support.domain.TicketAnalysis;
 import com.joinai_support.dto.*;
 import com.joinai_support.repository.AdminRepository;
 import com.joinai_support.repository.SupportTicketRepository;
@@ -106,8 +107,23 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             return "Failed to save the support ticket. Please try again.";
         }
 
-        //sending the ticket to mongodb for future analysis
-        ticketAnalysisServiceImpl.createRecord(String.valueOf(supportTicket.getId()), supportTicket.getContent(), supportTicket.getIssuerEmail());
+        // sending the ticket to mongodb for contextual history + analytics
+        try {
+            ticketAnalysisServiceImpl.createRecord(
+                    String.valueOf(supportTicket.getId()),
+                    supportTicket.getContent(),
+                    supportTicket.getIssuerEmail()
+            );
+            ticketAnalysisServiceImpl.appendConversationEntry(
+                    String.valueOf(supportTicket.getId()),
+                    "SYSTEM",
+                    "system",
+                    "Ticket opened and assigned to " + resolveAssignedAgentName(supportTicket),
+                    LocalDateTime.now()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to initialize MongoDB ticket analysis record for ticket {}", supportTicket.getId(), e);
+        }
 
         return "Ticket successfully opened " ;
     }
@@ -141,6 +157,32 @@ public class SupportTicketServiceImpl implements SupportTicketService {
 
         // Save updated ticket
         supportTicketRepository.save(ticket);
+
+        if (supportTicket.getReply() != null && !supportTicket.getReply().trim().isEmpty()) {
+            try {
+                ticketAnalysisServiceImpl.appendConversationEntry(
+                        String.valueOf(ticket.getId()),
+                        "AGENT",
+                        "agent-dashboard",
+                        supportTicket.getReply().trim(),
+                        LocalDateTime.now()
+                );
+            } catch (Exception e) {
+                logger.warn("Failed to append agent reply to MongoDB history for ticket {}", ticket.getId(), e);
+            }
+        }
+
+        try {
+            ticketAnalysisServiceImpl.appendConversationEntry(
+                    String.valueOf(ticket.getId()),
+                    "SYSTEM",
+                    "system",
+                    "Ticket status updated to " + ticket.getStatus(),
+                    LocalDateTime.now()
+            );
+        } catch (Exception e) {
+            logger.warn("Failed to append status update to MongoDB history for ticket {}", ticket.getId(), e);
+        }
 
         // Send email to assigned admin
         Admin assignedAdmin = ticket.getAssignedTo();
@@ -268,6 +310,184 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         });
 
         return ResponseEntity.ok(notifications);
+    }
+
+    public ResponseEntity<TicketLookupResponse> lookupTicketContext(TicketLookupRequest request) {
+        TicketLookupResponse response = new TicketLookupResponse();
+
+        if (request == null || (request.getTicketId() == null
+                && (request.getEmail() == null || request.getEmail().isBlank()))) {
+            response.setFound(false);
+            response.setMessage("Please provide either a ticket number or an email address.");
+            return ResponseEntity.ok(response);
+        }
+
+        List<SupportTicket> matchedTickets = new ArrayList<>();
+
+        if (request.getTicketId() != null) {
+            Optional<SupportTicket> byTicketId = supportTicketRepository.findById(request.getTicketId());
+            if (byTicketId.isPresent()) {
+                SupportTicket supportTicket = byTicketId.get();
+                if (request.getEmail() != null && !request.getEmail().isBlank()) {
+                    boolean ownerMatches = supportTicket.getIssuerEmail() != null
+                            && supportTicket.getIssuerEmail().equalsIgnoreCase(request.getEmail().trim());
+                    if (!ownerMatches) {
+                        response.setFound(false);
+                        response.setMessage("Ticket #" + request.getTicketId()
+                                + " exists, but it was not opened with the provided email address.");
+                        return ResponseEntity.ok(response);
+                    }
+                }
+                matchedTickets.add(supportTicket);
+            }
+        } else if (request.getEmail() != null && !request.getEmail().isBlank()) {
+            matchedTickets = supportTicketRepository
+                    .findAllByIssuerEmailIgnoreCaseOrderByLaunchTimestampDesc(request.getEmail().trim());
+        }
+
+        if (!request.isIncludeClosed()) {
+            matchedTickets = matchedTickets.stream()
+                    .filter(ticket -> ticket.getStatus() != Status.CLOSED)
+                    .toList();
+        }
+
+        if (matchedTickets.isEmpty()) {
+            response.setFound(false);
+            response.setMessage("No open ticket was found for the provided identifier.");
+            return ResponseEntity.ok(response);
+        }
+
+        List<TicketContextDTO> ticketContexts = matchedTickets.stream()
+                .map(this::toTicketContextDTO)
+                .toList();
+
+        response.setFound(true);
+        response.setTickets(ticketContexts);
+        response.setMessage("Loaded " + ticketContexts.size() + " ticket(s) with full context.");
+        return ResponseEntity.ok(response);
+    }
+
+    @Transactional
+    public ResponseEntity<String> appendConversationEvent(TicketConversationEventRequest request) {
+        if (request == null || request.getMessage() == null || request.getMessage().isBlank()) {
+            return ResponseEntity.badRequest().body("Conversation event message is required.");
+        }
+
+        Optional<SupportTicket> ticketOptional = resolveTicketForConversationEvent(request);
+        if (ticketOptional.isEmpty()) {
+            return ResponseEntity.status(404).body("No matching ticket found for conversation event.");
+        }
+
+        SupportTicket ticket = ticketOptional.get();
+        ticketAnalysisServiceImpl.appendConversationEntry(
+                String.valueOf(ticket.getId()),
+                request.getActorRole(),
+                request.getChannel(),
+                request.getMessage(),
+                request.getTimestamp()
+        );
+
+        if (ticket.getUpdatedAt() == null || ticket.getUpdatedAt().isBefore(LocalDateTime.now().minusSeconds(1))) {
+            ticket.setUpdatedAt(LocalDateTime.now());
+            supportTicketRepository.save(ticket);
+        }
+
+        return ResponseEntity.ok("Conversation event recorded.");
+    }
+
+    private Optional<SupportTicket> resolveTicketForConversationEvent(TicketConversationEventRequest request) {
+        if (request.getTicketId() != null) {
+            return supportTicketRepository.findById(request.getTicketId());
+        }
+
+        if (request.getEmail() == null || request.getEmail().isBlank()) {
+            return Optional.empty();
+        }
+
+        List<SupportTicket> byEmail = supportTicketRepository
+                .findAllByIssuerEmailIgnoreCaseOrderByLaunchTimestampDesc(request.getEmail().trim());
+
+        return byEmail.stream()
+                .filter(ticket -> ticket.getStatus() != Status.CLOSED)
+                .findFirst()
+                .or(() -> byEmail.stream().findFirst());
+    }
+
+    private TicketContextDTO toTicketContextDTO(SupportTicket ticket) {
+        TicketContextDTO dto = new TicketContextDTO();
+        dto.setTicketId(ticket.getId());
+        dto.setStatus(ticket.getStatus() == null ? "UNKNOWN" : ticket.getStatus().name());
+        dto.setIssueDescription(ticket.getContent());
+        dto.setSubject(ticket.getSubject());
+        dto.setIssuerEmail(ticket.getIssuerEmail());
+        dto.setAssignedAgent(resolveAssignedAgentName(ticket));
+        dto.setChannelOfOrigin(resolveChannelOfOrigin(ticket.getId()));
+        dto.setLaunchTimestamp(ticket.getLaunchTimestamp());
+        dto.setUpdatedAt(ticket.getUpdatedAt());
+        dto.setServedTimestamp(ticket.getServedTimestamp());
+        dto.setOpenTicket(ticket.getStatus() != Status.CLOSED);
+        dto.setMinutesOpen(calculateMinutesOpen(ticket));
+
+        List<TicketAnalysis.TicketConversationEntry> entries =
+                ticketAnalysisServiceImpl.getConversationHistory(String.valueOf(ticket.getId()));
+
+        List<TicketConversationMessageDTO> conversation = new ArrayList<>();
+        for (TicketAnalysis.TicketConversationEntry entry : entries) {
+            TicketConversationMessageDTO conversationMessageDTO = new TicketConversationMessageDTO();
+            conversationMessageDTO.setActorRole(entry.getActorRole());
+            conversationMessageDTO.setChannel(entry.getChannel());
+            conversationMessageDTO.setMessage(entry.getMessage());
+            conversationMessageDTO.setTimestamp(entry.getTimestamp());
+            conversation.add(conversationMessageDTO);
+        }
+        dto.setConversationHistory(conversation);
+
+        return dto;
+    }
+
+    private String resolveAssignedAgentName(SupportTicket ticket) {
+        if (ticket.getAssignedTo() == null) {
+            return "Unassigned";
+        }
+        String firstName = ticket.getAssignedTo().getFirstName();
+        return (firstName != null && !firstName.isBlank())
+                ? firstName
+                : ticket.getAssignedTo().getEmail();
+    }
+
+    private String resolveChannelOfOrigin(Long ticketId) {
+        Optional<TicketAnalysis> analysis = ticketAnalysisServiceImpl.getTicket(String.valueOf(ticketId));
+        if (analysis.isPresent()) {
+            List<TicketAnalysis.TicketConversationEntry> history = analysis.get().getConversationHistory();
+            if (history != null && !history.isEmpty()) {
+                for (TicketAnalysis.TicketConversationEntry entry : history) {
+                    if (entry.getChannel() == null || entry.getChannel().isBlank()) {
+                        continue;
+                    }
+                    String channel = entry.getChannel().toLowerCase();
+                    if (!"unknown".equals(channel) && !"system".equals(channel)) {
+                        return channel;
+                    }
+                }
+            }
+            if (analysis.get().getSource() != null) {
+                return analysis.get().getSource().name().toLowerCase();
+            }
+        }
+        return "web";
+    }
+
+    private long calculateMinutesOpen(SupportTicket ticket) {
+        if (ticket.getLaunchTimestamp() == null) {
+            return 0;
+        }
+
+        LocalDateTime end = ticket.getStatus() == Status.CLOSED && ticket.getServedTimestamp() != null
+                ? ticket.getServedTimestamp()
+                : LocalDateTime.now();
+
+        Duration duration = Duration.between(ticket.getLaunchTimestamp(), end);
+        return Math.max(0, duration.toMinutes());
     }
 
 }

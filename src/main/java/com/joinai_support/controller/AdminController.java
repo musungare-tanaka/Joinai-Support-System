@@ -1,13 +1,16 @@
 package com.joinai_support.controller;
 
 import com.joinai_support.domain.Admin;
+import com.joinai_support.domain.AuditLog;
 import com.joinai_support.domain.SupportTicket;
 import com.joinai_support.dto.*;
 import com.joinai_support.repository.SupportTicketRepository;
+import com.joinai_support.service.AuditLogService;
 import com.joinai_support.service.serviceImpl.AdminServiceImpl;
 
 
 import com.joinai_support.utils.AdminDTO;
+import com.joinai_support.utils.Role;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,12 +26,18 @@ public class AdminController {
     private final AdminServiceImpl adminServiceImpl;
 
     private final SupportTicketRepository supportTicketRepository;
+    private final AuditLogService auditLogService;
 
     @Autowired
-    public AdminController(AdminServiceImpl adminServiceImpl, SupportTicketRepository supportTicketRepository) {
+    public AdminController(
+            AdminServiceImpl adminServiceImpl,
+            SupportTicketRepository supportTicketRepository,
+            AuditLogService auditLogService
+    ) {
         this.adminServiceImpl = adminServiceImpl;
 
         this.supportTicketRepository = supportTicketRepository;
+        this.auditLogService = auditLogService;
     }
 
     @PostMapping("/createAdmin")
@@ -105,6 +114,24 @@ public class AdminController {
     @PostMapping("/getAnalytics")
     public ResponseEntity<SystemAnalytics>  getAnalytics() {
         return adminServiceImpl.systemAnalytics();
+    }
+
+    @PostMapping("/auditLogs")
+    public ResponseEntity<List<AuditLog>> getAuditLogs(
+            @RequestBody EmailRequest request,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50") int size
+    ) {
+        Admin admin = adminServiceImpl.getAdmin(request.getEmail());
+        if (admin == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        if (admin.getRole() != Role.ADMIN) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        return ResponseEntity.ok(auditLogService.getRecentLogs(page, size));
     }
 
 

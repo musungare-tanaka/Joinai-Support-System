@@ -44,7 +44,18 @@ public class SupportTicketController {
         ticket.setIssuerEmail(supportTicket.getEmail());
         ticket.setSubject(supportTicket.getSubject());
         ticket.setContent(supportTicket.getContent());
-        return supportTicketServiceImpl.launchTicket(ticket);
+        String result = supportTicketServiceImpl.launchTicket(ticket);
+
+        if (supportTicket.getSource() != null && !supportTicket.getSource().isBlank()) {
+            TicketConversationEventRequest eventRequest = new TicketConversationEventRequest();
+            eventRequest.setEmail(supportTicket.getEmail());
+            eventRequest.setActorRole("SYSTEM");
+            eventRequest.setChannel(supportTicket.getSource());
+            eventRequest.setMessage("Ticket created through " + supportTicket.getSource() + " channel.");
+            supportTicketServiceImpl.appendConversationEvent(eventRequest);
+        }
+
+        return result;
     }
 
     @RequestMapping("/updateTicket")
@@ -75,6 +86,16 @@ public class SupportTicketController {
     @RequestMapping("/ticketNotifications")
     public ResponseEntity<List<TicketDTO>> getTicketNotifications(@RequestBody EmailRequest emailRequest) {
         return supportTicketServiceImpl.getNotifications(emailRequest.getEmail());
+    }
+
+    @PostMapping("/lookup")
+    public ResponseEntity<TicketLookupResponse> lookupTicketContext(@RequestBody TicketLookupRequest request) {
+        return supportTicketServiceImpl.lookupTicketContext(request);
+    }
+
+    @PostMapping("/conversation-event")
+    public ResponseEntity<String> appendConversationEvent(@RequestBody TicketConversationEventRequest request) {
+        return supportTicketServiceImpl.appendConversationEvent(request);
     }
 
 

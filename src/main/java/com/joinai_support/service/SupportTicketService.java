@@ -22,4 +22,8 @@ public interface SupportTicketService {
     ResponseEntity<StatsByAgent> getStatsByAgent(Admin admin);
 
     ResponseEntity<List<TicketDTO>> getNotifications(String email);
+
+    ResponseEntity<TicketLookupResponse> lookupTicketContext(TicketLookupRequest request);
+
+    ResponseEntity<String> appendConversationEvent(TicketConversationEventRequest request);
 }

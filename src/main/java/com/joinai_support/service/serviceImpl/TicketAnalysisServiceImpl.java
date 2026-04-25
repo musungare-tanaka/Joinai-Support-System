@@ -7,6 +7,9 @@ import com.joinai_support.service.TicketAnalysisService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -50,5 +53,39 @@ public class TicketAnalysisServiceImpl implements TicketAnalysisService {
 
 
 
+    }
+
+    @Transactional
+    public TicketAnalysis appendConversationEntry(
+            String ticketId,
+            String actorRole,
+            String channel,
+            String message,
+            LocalDateTime timestamp
+    ) {
+        Optional<TicketAnalysis> ticketOpt = repository.findById(ticketId);
+        if (ticketOpt.isEmpty()) {
+            throw new RuntimeException("Ticket with ID " + ticketId + " not found");
+        }
+
+        TicketAnalysis ticket = ticketOpt.get();
+        ticket.addConversationEntry(actorRole, channel, message, timestamp);
+        return repository.save(ticket);
+    }
+
+    public List<TicketAnalysis.TicketConversationEntry> getConversationHistory(String ticketId) {
+        Optional<TicketAnalysis> ticketOpt = repository.findById(ticketId);
+        if (ticketOpt.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<TicketAnalysis.TicketConversationEntry> conversationHistory = ticketOpt.get().getConversationHistory();
+        if (conversationHistory == null || conversationHistory.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<TicketAnalysis.TicketConversationEntry> sorted = new ArrayList<>(conversationHistory);
+        sorted.sort(Comparator.comparing(TicketAnalysis.TicketConversationEntry::getTimestamp));
+        return sorted;
     }
 }

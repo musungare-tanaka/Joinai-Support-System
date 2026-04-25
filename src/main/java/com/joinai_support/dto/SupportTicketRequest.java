@@ -7,4 +7,5 @@ public class SupportTicketRequest {
     private String email;
     private String subject;
     private String content;
+    private String source;
 }

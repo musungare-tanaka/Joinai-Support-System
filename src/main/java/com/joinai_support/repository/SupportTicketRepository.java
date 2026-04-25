@@ -14,4 +14,6 @@ public interface SupportTicketRepository extends JpaRepository<SupportTicket, Lo
     List<SupportTicket> findAll();
 
     List<SupportTicket> findAllByAssignedTo(Admin assignedTo);
+
+    List<SupportTicket> findAllByIssuerEmailIgnoreCaseOrderByLaunchTimestampDesc(String issuerEmail);
 }
