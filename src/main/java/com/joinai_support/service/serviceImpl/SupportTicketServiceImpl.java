@@ -47,21 +47,19 @@ public class SupportTicketServiceImpl implements SupportTicketService {
         // Fetch all available admins
         ResponseEntity<List<Admin>> agentsResponse = adminServiceImpl.getAll();
         List<Admin> agentList = agentsResponse.getBody();
+        Admin selectedAdmin = null;
 
         if (agentList == null || agentList.isEmpty()) {
-            logger.warn("No admins available to assign the ticket");
-            return "No agents available to assign the ticket.";
-        }
+            logger.warn("No admins available to assign ticket. Ticket will be opened as unassigned.");
+        } else {
+            // Find the admin with the least number of tickets
+            selectedAdmin = agentList.stream()
+                    .min(Comparator.comparingInt(admin -> admin.getTickets() == null ? 0 : admin.getTickets().size()))
+                    .orElse(null);
 
-        // Find the admin with the least number of tickets
-        Admin selectedAdmin = agentList.stream()
-                .filter(admin -> admin.getTickets() != null)
-                .min(Comparator.comparingInt(admin -> admin.getTickets().size()))
-                .orElse(null);
-
-        if (selectedAdmin == null) {
-            logger.warn("Failed to find a suitable admin for ticket assignment");
-            return "Failed to find a suitable admin for ticket assignment.";
+            if (selectedAdmin == null) {
+                logger.warn("Failed to find a suitable admin for ticket assignment. Ticket will be opened as unassigned.");
+            }
         }
 
         // Assign the ticket to the selected admin
@@ -83,12 +81,16 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             supportTicketRepository.save(supportTicket);
 
             // Send email notification to the assigned admin
-            try {
-                mailSenderService.sendTicketCreationNotification(supportTicket, selectedAdmin);
-                logger.info("Ticket creation notification queued for admin: {}", selectedAdmin.getEmail());
-            } catch (Exception e) {
-                // Log the exception but don't fail the ticket creation
-                logger.error("Failed to send ticket creation notification to admin: {}", selectedAdmin.getEmail(), e);
+            if (selectedAdmin != null) {
+                try {
+                    mailSenderService.sendTicketCreationNotification(supportTicket, selectedAdmin);
+                    logger.info("Ticket creation notification queued for admin: {}", selectedAdmin.getEmail());
+                } catch (Exception e) {
+                    // Log the exception but don't fail the ticket creation
+                    logger.error("Failed to send ticket creation notification to admin: {}", selectedAdmin.getEmail(), e);
+                }
+            } else {
+                logger.info("Skipping admin ticket creation notification because no admin is currently assigned for ticket {}", supportTicket.getId());
             }
 
             // Send email notification to the customer who opened the ticket
@@ -118,7 +120,9 @@ public class SupportTicketServiceImpl implements SupportTicketService {
                     String.valueOf(supportTicket.getId()),
                     "SYSTEM",
                     "system",
-                    "Ticket opened and assigned to " + resolveAssignedAgentName(supportTicket),
+                    selectedAdmin == null
+                            ? "Ticket opened and waiting for agent assignment."
+                            : "Ticket opened and assigned to " + resolveAssignedAgentName(supportTicket),
                     LocalDateTime.now()
             );
         } catch (Exception e) {
