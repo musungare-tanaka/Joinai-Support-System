@@ -3,6 +3,7 @@ package com.joinai_support.utils;
 import com.joinai_support.domain.Admin;
 import com.joinai_support.domain.SupportTicket;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -20,10 +21,15 @@ public class MailSenderService {
     private static final Logger logger = LoggerFactory.getLogger(MailSenderService.class);
 
     private final JavaMailSender mailSender;
+    private final String mailUsername;
 
     @Autowired
-    public MailSenderService(JavaMailSender mailSender) {
+    public MailSenderService(
+            JavaMailSender mailSender,
+            @Value("${spring.mail.username:}") String mailUsername
+    ) {
         this.mailSender = mailSender;
+        this.mailUsername = mailUsername;
     }
 
     /**
@@ -96,8 +102,8 @@ public class MailSenderService {
 
     //TODO WORK ON THE REPLY TO THE EMAIL
     public void sendTicketClosedNotification(SupportTicket ticket, String reply) {
-        if (ticket.getSubject() == null || ticket.getSubject().isEmpty()) {
-            logger.warn("Cannot send ticket closed notification: subject (which contains issuer info) is missing for ticket ID: {}",
+        if (ticket.getIssuerEmail() == null || ticket.getIssuerEmail().isBlank()) {
+            logger.warn("Cannot send ticket closed notification: issuer email is missing for ticket ID: {}",
                     ticket.getId());
             return;
         }
@@ -161,8 +167,8 @@ public class MailSenderService {
 
     @Async
     public void sendTicketOpenedNotification(SupportTicket ticket) {
-        if (ticket.getSubject() == null || ticket.getSubject().isEmpty()) {
-            logger.warn("Cannot send ticket opened notification: subject (which contains issuer info) is missing for ticket ID: {}",
+        if (ticket.getIssuerEmail() == null || ticket.getIssuerEmail().isBlank()) {
+            logger.warn("Cannot send ticket opened notification: issuer email is missing for ticket ID: {}",
                     ticket.getId());
             return;
         }
@@ -274,21 +280,26 @@ public class MailSenderService {
 
     @Async
     private void sendEmail(String to, String subject, String text) {
+        String recipient = to == null ? null : to.trim();
+
         // Validate email address before sending
-        if (!isValidEmail(to)) {
+        if (!isValidEmail(recipient)) {
             logger.error("Invalid email address: {}, email not sent", to);
             return; // Skip sending email to invalid addresses
         }
 
         try {
             SimpleMailMessage message = new SimpleMailMessage();
-            message.setTo(to);
+            message.setTo(recipient);
+            if (mailUsername != null && !mailUsername.isBlank()) {
+                message.setFrom(mailUsername.trim());
+            }
             message.setSubject(subject);
             message.setText(text);
             mailSender.send(message);
-            logger.info("Email sent successfully to {}", to);
+            logger.info("Email sent successfully to {}", recipient);
         } catch (MailException e) {
-            logger.error("Failed to send email to {}: {}", to, e.getMessage());
+            logger.error("Failed to send email to {}: {}", recipient, e.getMessage(), e);
             throw new RuntimeException("Failed to send email", e);
         }
     }

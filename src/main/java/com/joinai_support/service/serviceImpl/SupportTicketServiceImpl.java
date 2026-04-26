@@ -85,7 +85,7 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             // Send email notification to the assigned admin
             try {
                 mailSenderService.sendTicketCreationNotification(supportTicket, selectedAdmin);
-                logger.info("Ticket creation notification sent to admin: {}", selectedAdmin.getEmail());
+                logger.info("Ticket creation notification queued for admin: {}", selectedAdmin.getEmail());
             } catch (Exception e) {
                 // Log the exception but don't fail the ticket creation
                 logger.error("Failed to send ticket creation notification to admin: {}", selectedAdmin.getEmail(), e);
@@ -95,10 +95,10 @@ public class SupportTicketServiceImpl implements SupportTicketService {
             try {
                 mailSenderService.sendTicketOpenedNotification(supportTicket);
 
-                logger.info("Ticket creation notification sent to customer: {}", supportTicket.getSubject());
+                logger.info("Ticket creation notification queued for customer: {}", supportTicket.getIssuerEmail());
             } catch (Exception e) {
                 // Log the exception but don't fail the ticket creation
-                logger.error("Failed to send ticket creation notification to customer: {}", supportTicket.getSubject(), e);
+                logger.error("Failed to send ticket creation notification to customer: {}", supportTicket.getIssuerEmail(), e);
             }
 
         } catch (Exception e) {
