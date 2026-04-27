@@ -10,4 +10,4 @@ EXPOSE 8083
 
 ENV SPRING_PROFILES_ACTIVE=default
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Dserver.port=8083", "-jar", "app.jar"]

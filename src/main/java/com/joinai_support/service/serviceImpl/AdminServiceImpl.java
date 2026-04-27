@@ -53,6 +53,7 @@ public class AdminServiceImpl implements AdminService {
             agent.setPassword(admin.getPassword());
             agent.setFirstName(admin.getFirstName());
             agent.setRole(Role.AGENT);
+            agent.setEnabled(Boolean.TRUE);
             adminRepository.save(agent);
 
             // Send welcome email to the new agent
@@ -86,6 +87,7 @@ public class AdminServiceImpl implements AdminService {
             admin1.setPassword(admin.getPassword());
             admin1.setFirstName(admin.getFirstName());
             admin1.setRole(Role.ADMIN);
+            admin1.setEnabled(Boolean.TRUE);
             adminRepository.save(admin1);
 
             // Send welcome email to the new admin
@@ -122,6 +124,34 @@ public class AdminServiceImpl implements AdminService {
         } else {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
+    }
+
+    @Transactional
+    public ResponseEntity<Admin> updateAgentStatus(AgentStatusUpdateRequest request) {
+        if (request.getToken() == null || request.getToken().isBlank()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (request.getAgentEmail() == null || request.getAgentEmail().isBlank() || request.getEnabled() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        Optional<User> actor = userRepository.findByEmail(request.getToken());
+        if (actor.isEmpty() || actor.get().getRole() != Role.ADMIN) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        Admin target = adminRepository.findByEmail(request.getAgentEmail().trim());
+        if (target == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        if (target.getRole() != Role.AGENT && target.getRole() != Role.ADMIN) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        target.setEnabled(request.getEnabled());
+        Admin updated = adminRepository.save(target);
+        return ResponseEntity.ok(updated);
     }
 
     @Transactional
@@ -462,6 +492,99 @@ public class AdminServiceImpl implements AdminService {
         return ResponseEntity.ok(adminDTO);
     }
 
+    @Override
+    public ResponseEntity<AgentSettingsDTO> getAgentSettings(EmailRequest request) {
+        if (request == null || request.getEmail() == null || request.getEmail().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        String email = request.getEmail().trim();
+        Optional<User> user = userRepository.findByEmail(email);
+        if (user.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Admin admin = adminRepository.findByEmail(email);
+        if (admin == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        boolean needsDefaults = admin.getEmailNotifications() == null
+                || admin.getInAppNotifications() == null
+                || admin.getTicketEscalationAlerts() == null
+                || admin.getLanguage() == null
+                || admin.getDefaultTicketView() == null
+                || admin.getSignature() == null
+                || admin.getRefreshIntervalSeconds() == null
+                || admin.getCompactTicketCards() == null;
+
+        if (needsDefaults) {
+            admin.ensureSettingsDefaults();
+            admin = adminRepository.save(admin);
+        }
+
+        return ResponseEntity.ok(mapSettings(admin));
+    }
+
+    @Override
+    @Transactional
+    public ResponseEntity<AgentSettingsDTO> updateAgentSettings(AgentSettingsDTO request) {
+        if (request == null || request.getEmail() == null || request.getEmail().isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        String email = request.getEmail().trim();
+        Optional<User> user = userRepository.findByEmail(email);
+        if (user.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        Admin admin = adminRepository.findByEmail(email);
+        if (admin == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        if (request.getEmailNotifications() != null) {
+            admin.setEmailNotifications(request.getEmailNotifications());
+        }
+        if (request.getInAppNotifications() != null) {
+            admin.setInAppNotifications(request.getInAppNotifications());
+        }
+        if (request.getTicketEscalationAlerts() != null) {
+            admin.setTicketEscalationAlerts(request.getTicketEscalationAlerts());
+        }
+        if (request.getCompactTicketCards() != null) {
+            admin.setCompactTicketCards(request.getCompactTicketCards());
+        }
+
+        String normalizedLanguage = normalizeLanguage(request.getLanguage());
+        if (normalizedLanguage != null) {
+            admin.setLanguage(normalizedLanguage);
+        }
+
+        String normalizedView = normalizeTicketView(request.getDefaultTicketView());
+        if (normalizedView != null) {
+            admin.setDefaultTicketView(normalizedView);
+        }
+
+        Integer normalizedRefresh = normalizeRefreshInterval(request.getRefreshIntervalSeconds());
+        if (normalizedRefresh != null) {
+            admin.setRefreshIntervalSeconds(normalizedRefresh);
+        }
+
+        if (request.getSignature() != null) {
+            String normalizedSignature = request.getSignature().trim();
+            if (normalizedSignature.length() > 500) {
+                normalizedSignature = normalizedSignature.substring(0, 500);
+            }
+            admin.setSignature(normalizedSignature);
+        }
+
+        admin.ensureSettingsDefaults();
+        Admin saved = adminRepository.save(admin);
+        return ResponseEntity.ok(mapSettings(saved));
+    }
+
     @Transactional
     public ResponseEntity<String> forgetPassword(EmailRequest request) {
         //checking to see if the user exists in the user tables before sending a email
@@ -482,6 +605,43 @@ public class AdminServiceImpl implements AdminService {
 
 
 
+    }
+
+    private AgentSettingsDTO mapSettings(Admin admin) {
+        AgentSettingsDTO dto = new AgentSettingsDTO();
+        dto.setEmail(admin.getEmail());
+        dto.setEmailNotifications(admin.getEmailNotifications() != null ? admin.getEmailNotifications() : Boolean.TRUE);
+        dto.setInAppNotifications(admin.getInAppNotifications() != null ? admin.getInAppNotifications() : Boolean.TRUE);
+        dto.setTicketEscalationAlerts(admin.getTicketEscalationAlerts() != null ? admin.getTicketEscalationAlerts() : Boolean.TRUE);
+        dto.setLanguage(normalizeLanguage(admin.getLanguage()) != null ? normalizeLanguage(admin.getLanguage()) : "English");
+        dto.setDefaultTicketView(normalizeTicketView(admin.getDefaultTicketView()) != null ? normalizeTicketView(admin.getDefaultTicketView()) : "list");
+        dto.setSignature(admin.getSignature() != null ? admin.getSignature() : "");
+        dto.setRefreshIntervalSeconds(normalizeRefreshInterval(admin.getRefreshIntervalSeconds()) != null ? normalizeRefreshInterval(admin.getRefreshIntervalSeconds()) : 60);
+        dto.setCompactTicketCards(admin.getCompactTicketCards() != null ? admin.getCompactTicketCards() : Boolean.FALSE);
+        return dto;
+    }
+
+    private String normalizeLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return null;
+        }
+        String value = language.trim();
+        List<String> allowed = List.of("English", "Spanish", "French", "German");
+        return allowed.contains(value) ? value : "English";
+    }
+
+    private String normalizeTicketView(String view) {
+        if (view == null || view.isBlank()) {
+            return null;
+        }
+        return "kanban".equalsIgnoreCase(view.trim()) ? "kanban" : "list";
+    }
+
+    private Integer normalizeRefreshInterval(Integer seconds) {
+        if (seconds == null) {
+            return null;
+        }
+        return Math.max(15, Math.min(300, seconds));
     }
 
 

@@ -33,4 +33,10 @@ public interface AdminService {
     ResponseEntity<AdminDTO> getProfileData(EmailRequest profileRequest);
 
     ResponseEntity<String> forgetPassword(EmailRequest request);
+
+    ResponseEntity<Admin> updateAgentStatus(AgentStatusUpdateRequest request);
+
+    ResponseEntity<AgentSettingsDTO> getAgentSettings(EmailRequest request);
+
+    ResponseEntity<AgentSettingsDTO> updateAgentSettings(AgentSettingsDTO request);
 }

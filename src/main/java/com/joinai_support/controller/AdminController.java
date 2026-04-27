@@ -58,6 +58,10 @@ public class AdminController {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();}
 
+        if (Boolean.FALSE.equals(user.getEnabled())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         if (!user.getPassword().equals(authenticationRequest.getPassword())) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
@@ -80,6 +84,11 @@ public class AdminController {
         return adminServiceImpl.getAllAgents(request);
     }
 
+    @PostMapping("/updateAgentStatus")
+    public ResponseEntity<Admin> updateAgentStatus(@RequestBody AgentStatusUpdateRequest request) {
+        return adminServiceImpl.updateAgentStatus(request);
+    }
+
     @GetMapping("/getAll")
     public ResponseEntity<List<SupportTicket>> getAllTickets() {
         List<SupportTicket> users = supportTicketRepository.findAll();
@@ -94,6 +103,16 @@ public class AdminController {
     @PostMapping("/getProfileData")
     public ResponseEntity<AdminDTO> getProfileData(@RequestBody EmailRequest profileRequest) {
         return adminServiceImpl.getProfileData(profileRequest);
+    }
+
+    @PostMapping("/getSettings")
+    public ResponseEntity<AgentSettingsDTO> getSettings(@RequestBody EmailRequest request) {
+        return adminServiceImpl.getAgentSettings(request);
+    }
+
+    @PostMapping("/updateSettings")
+    public ResponseEntity<AgentSettingsDTO> updateSettings(@RequestBody AgentSettingsDTO request) {
+        return adminServiceImpl.updateAgentSettings(request);
     }
 
 
